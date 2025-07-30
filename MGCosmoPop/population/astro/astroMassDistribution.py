@@ -7,10 +7,7 @@
 from ..ABSpopulation import BBHDistFunction
 import numpy as np
 import scipy.stats as ss
-try:
-    from scipy.integrate import cumtrapz
-except:
-    from scipy.integrate import cumulative_trapezoid as cumtrapz
+from scipy.integrate import cumtrapz
 
 import sys
 import os
@@ -1280,7 +1277,136 @@ class BrokenPowerLawMassBNS(BBHDistFunction):
             
         return m1, m2
 
+    
+##############################################################################
+# NSBH Distribution
 
+
+class GaussianJinPingNSBH(BBHDistFunction):
+    
+    '''
+    Mass distribution  - Jin Ping and Gaussian
+    '''
+
+    def __init__(self):
+        
+        BBHDistFunction.__init__(self)
+        
+        self.params = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'meanMass', 'sigmaMass' ]
+        
+        self.baseValues = {
+                           'a1': 1.04e11,
+                           'a2': 799.1, 
+                           'a3': 0.002845,
+                           'b1': 2.1489,
+                           'b2': 0.2904,
+                           'b3': 1.686,
+                           'meanMass': 1.33,
+                           'sigmaMass': 0.09,
+                           }
+        
+        self.names = { 
+                           'a1': r'$a_1$',
+                           'a2': r'$a_2$' , 
+                           'a3': r'$a_3$',
+                           'b1': r'$b_1$',
+                           'b2': r'$b_2$',
+                           'b3': r'$b_3$',
+                           'meanMass':r'$\mu_{\rm mass}$',
+                           'sigmaMass':r'$\sigma_{\rm mass}$', 
+                           }
+         
+        self.n_params = len(self.params)
+        
+        print('Jin Ping and Gaussian function base values: %s' %self.baseValues)
+    
+    def _logpdf1(self, m, a1, a2, a3, b1, b2, b3):
+        '''
+        Marginal distribution p(m1), not normalised
+        '''
+        import scipy
+        where_nan = np.isnan(m)
+        result = np.zeros(m.shape)
+        
+        result[where_nan]=np.NINF
+        
+        # max_compute = max(mh, muMass+10*sigmaMass)
+        
+        # where_compute = (m <= max_compute) & (m >= ml) & (~where_nan)
+        # result[~where_compute] = np.NINF
+        
+        # m = m[where_compute]
+        term1 = 1/(a1*np.exp(-b1*m)+a2*np.exp(-b2*m))
+        term2 = 1/(a3*np.exp(b3*m))
+
+        term1l = lambda m: 1/(a1*np.exp(-b1*m)+a2*np.exp(-b2*m))
+        term2l = lambda m: 1/(a3*np.exp(b3*m))
+        
+        pm1 = np.log(1/(term1+term2))
+        integralpm1, _ = scipy.integrate.quad(lambda m: ((a1*np.exp(-b1*m)+a2*np.exp(-b2*m))**-1 + (a3*np.exp(b3*m))**-1)**-1 , 0, 25)
+        normConstant = 1/integralpm1
+        pm1n = normConstant*np.exp(pm1)
+    
+        return pm1n
+
+    def _logpdf2(self, m2, lambdaNSmass):
+        
+        '''p( m2 | Lambda ) = p(m2), normalized to one'''
+        
+        # m1, m2 = theta
+        meanMass, sigmaMass = lambdaNSmass
+        
+        #condition = (m2<m1) & (m2>5)
+        #if not condition:
+        #    return np.NINF
+        
+        logpdfm2 = np.log(truncGausslower(m2, 0., loc=meanMass, scale=sigmaMass))
+        
+        return logpdfm2
+
+    def logpdf():
+        
+        return
+        
+    def sample(self, nSamples, lambdaNSBHmass, ):
+        
+        a1, a2, a3, b1, b2, b3, meanMass, sigmaMass = lambdaNSBHmass
+
+        pm1n = lambda m: self._logpdf1(m, a1, a2, a3, b1, b2, b3)
+        
+        m1s = sample1d(nSamples, pm1n, 0, 25)
+        m2s = sample1d(nSamples, lambda x: truncGausslower(x, 0., loc=meanMass, scale=sigmaMass), max(0, meanMass-10*sigmaMass), meanMass+10*sigmaMass, )
+        
+        m1 = np.where(m1s>m2s, m1s, m2s)
+        m2 = np.where(m1s>m2s, m2s, m1s)
+        
+        return m1, m2
+
+
+    def sample1d(nSamples, pdf, lower, upper, res = 100000):
+    
+        ''' Sample from continuous pdf within bounds ''' 
+    
+        # this is about 15% faster than using a sample_discrete like approach to sample the grid, and allows for returning continuous samples 
+        x = np.linspace(lower, upper, res)
+        cdf = np.cumsum(pdf(x))
+        cdf = cdf / cdf[-1]
+        return np.interp(np.random.uniform(size=nSamples), cdf, x)
+    
+    def sampleMultipleTruncGaussLow(locs, scales, lowers):
+        from scipy.special import erf, erfinv
+        
+        Phialphas = 0.5*(1.+erf((lowers-locs)/(np.sqrt(2.)*scales)))
+        unifSam = np.random.uniform(size=len(locs))
+        arg = Phialphas + unifSam*(1.-Phialphas)
+        return np.sqrt(2)*erfinv(2.*arg - 1.)*scales + locs
+    
+    
+    def truncGausslower(x, xmin, loc=0., scale=1.):
+        from scipy.special import erf
+    
+        Phialpha = 0.5*(1.+erf((xmin-loc)/(np.sqrt(2.)*scale)))
+        return np.where(x>xmin, 1./(np.sqrt(2.*np.pi)*scale)/(1.-Phialpha) * np.exp(-(x-loc)**2/(2*scale**2)) ,0.)
 
 ##############################################################################
 # Dummy class; for testing
